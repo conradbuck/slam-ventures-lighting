@@ -18,11 +18,12 @@
 #define U_DAT 1
 
 #define BRIGHTNESS 255 //brightness ceiling
+
 unsigned long seed = 93;
 uint8_t FFACTOR = 2;
 uint8_t COLORCLASS = 1;
 uint8_t SOFTWARE_REVISION = 2;
-uint8_t BOOT_PATTERN = 2;    //0 for chasing, 1 for slow pulse, 2 for instant on default white
+uint8_t BOOT_PATTERN = 0;    //0 for chasing, 1 for slow pulse, 2 for instant on default white
 DEFINE_GRADIENT_PALETTE( Green_3D_1_gp ) { //leaves
     0, 120,220,120,
    42,  45,147, 48,
@@ -400,13 +401,6 @@ void initRadio() {
       ledsProject();
       delay(500);
     }
-  } else {
-    leds[0] = CRGB::Green;
-    ledsProject();
-    delay(500);
-    leds[0] = CRGB::Blue;
-    ledsProject();
-    delay(500);
   }
 }
 uint8_t paletteSelect(uint8_t n) {
@@ -631,6 +625,15 @@ void initUltra() {
 
 }
 
+void fadeUpBasic() {
+  _baseData.qcomm = 10;
+  _baseData.speed = 0;
+  _baseData.extra = 5;
+  _baseData.brightKey = 255;
+  paletteIndex = 0;
+  firstRun = 1;
+}
+
 void setup() {
   //const int ledPins[14] = {4,5,6,7,15,16,17,18,8,9,10,11,12,13};
   FastLED.addLeds<WS2811, 4, GRB>(ledsMatrix[0], NUM_LEDS);
@@ -648,11 +651,6 @@ void setup() {
   FastLED.addLeds<WS2811, 12, GRB>(ledsMatrix[12], NUM_LEDS);
   FastLED.addLeds<WS2811, 13, GRB>(ledsMatrix[13], NUM_LEDS);
   delay(100);
-  for(int i = 0; i < NUM_STRIPS; i++) {
-    FastLED.setBrightness(BRIGHTNESS);
-    fill_solid(ledsMatrix[i], NUM_LEDS, CRGB::Red);
-    FastLED.show();
-  }
 
   initRadio();
   initRotary();
@@ -691,14 +689,12 @@ void setup() {
     //
     FastLED.setBrightness(0);
     ledsProject();
+
+    fadeUpBasic();
   } else if(BOOT_PATTERN == 2) { //init to default white
-    _baseData.qcomm = 10;
-    _baseData.speed = 0;
-    _baseData.extra = 5;
-    _baseData.brightKey = 255;
-    paletteIndex = 0;
-    firstRun = 1;
+    fadeUpBasic();
   }
+  
   //ZONE NUMBER
   addr = 0;
 
@@ -777,7 +773,9 @@ void loop() {
   // delay(1000);
   // summonPeak(rcount);
   rdelta = rotary();
-  rcount += rdelta;
+  if(engineActive == 0) {
+    rcount += rdelta;
+  }
   if(rdelta != 0) {
     lastKnAct = millis();
     if(engineActive == 1) {
