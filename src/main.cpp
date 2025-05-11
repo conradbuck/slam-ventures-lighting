@@ -16,9 +16,10 @@
 //ultrasonic
 #define U_SER 2
 #define U_DAT 1
+//43 and 44 unused but are serial pins, maybe switch to them if UART necessary?
+//is 14 unused???
 
 #define BRIGHTNESS 255 //brightness ceiling
-
 unsigned long seed = 93;
 uint8_t FFACTOR = 2;
 uint8_t COLORCLASS = 1;
@@ -201,11 +202,13 @@ RadioPacket _baseData;
 RadioPacket _baseDataTemp;
 CRGB leds[NUM_LEDS];
 CRGB defaultColor = CRGB::SeaGreen;
+
 //rotate knob to change this during normal operation, sets dominant color for motion patterns and solid color for person tracking
 CRGB activeColor = CRGB::Purple;
+
 //change the indicies in this array to fill each LED strip with a different solid color, use ledsStripesProject(); to display it
-CRGB stripeColors[NUM_STRIPS];
-uint8_t stripeIndex[NUM_STRIPS];
+CRGB stripeColors[NUM_STRIPS]; //use this to hold specific colors for each strip to be fill_solid with
+uint8_t stripeIndex[NUM_STRIPS]; //use this to hold the index of a palette to then fill_solid(ColorFromPalette()) with
 
 CRGB ledsMatrix[NUM_STRIPS][NUM_LEDS];
 
@@ -392,7 +395,7 @@ void hueSatOnlyPaletteCircular(uint8_t a, uint8_t a2, uint8_t b, uint8_t b2, uin
 }
 
 void initRadio() {
-  SPI.begin(21,47,48);  // SCK, MISO, MOSI
+  SPI.begin(48,47,21);  // SCK, MISO, MOSI
   if(!_satellite.init(RADIO_ID, PIN_RADIO_CE, PIN_RADIO_CSN, NRFLite::BITRATE2MBPS)) {
     while (1) {
       leds[0] = CRGB::Red;
@@ -406,87 +409,108 @@ void initRadio() {
 }
 uint8_t paletteSelect(uint8_t n) {
   //return statement sets ancPoints
+  int a = 3;
   switch(n) {
     case 0:
       circularPalette = 0;
       dipoleFadePaletteCHSV(_baseData.rh, _baseData.gs, _baseData.bv, _baseData.rh2, _baseData.gs2, _baseData.bv2);
-      return 2;
+      a = 2;
+      break;
     case 1:
       circularPalette = 0;
       dipoleFadePaletteCRGB(_baseData.rh, _baseData.gs, _baseData.bv, _baseData.rh2, _baseData.gs2, _baseData.bv2);
-      return 2;
+      a = 2;
+      break;
     case 2:
       circularPalette = 1;
       ovalFadePalette(_baseData.rh, _baseData.gs);
-      return 3;
+      a = 3;
+      break;
     case 3:
       circularPalette = 1;
       ovalFadePaletteCRGB(_baseData.rh, _baseData.gs, _baseData.bv, _baseData.rh2, _baseData.gs2, _baseData.bv2);
-      return 3;
+      a = 3;
+      break;
     case 4:
       circularPalette = 1;
       triangleFadePalette(_baseData.rh, _baseData.gs, _baseData.bv);
-      return 4;
+      a = 4;
+      break;
     case 5:
       circularPalette = 0;
       twoColorPalette(_baseData.rh, _baseData.gs);
-      return 2;
+      a = 2;
+      break;
     case 6:
       circularPalette = 0;
       threeColorPalette(_baseData.rh, _baseData.gs, _baseData.bv);
-      return 3;
+      a = 3;
+      break;
     case 7:
       circularPalette = 0;
       fourColorPalette(_baseData.rh, _baseData.gs, _baseData.bv, _baseData.rh2);
-      return 4;
+      a = 4;
+      break;
     case 8:
       circularPalette = 1;
       blackIsolationPalette(_baseData.rh, _baseData.gs, _baseData.bv);
-      return 3;  
+      a = 3;
+      break; 
     case 9:
       circularPalette = 1;
       fillNewPalette(_baseData.rh, _baseData.gs, _baseData.bv);
-      return 8;
+      a = 8;
+      break;
     case 10:
       circularPalette = 1;
       colorScroll = anchor;
-      return 7;
+      a = 7;
+      break;
     case 11: //sunsetFade palette
       circularPalette = 1;
       triangleFadePalette(13, 165, 190);
-      return 4;
+      a = 4;
+      break;
     case 12: //caribbean blues
       circularPalette = 1;
       colorScroll = cbPal;
-      return 8;
+      a = 8;
+      break;
     case 13:
       circularPalette = 1;
       colorScroll = leaves;
-      return 8;
+      a = 8;
+      break;
     case 14:
       circularPalette = 0;
       hueSatOnlyPalette(_baseData.rh, _baseData.rh2, _baseData.gs, _baseData.gs2, _baseData.bv, _baseData.bv2);
-      return 3;
+      a = 3;
+      break;
     case 15:
       circularPalette = 1;
       hueSatOnlyPaletteCircular(_baseData.rh, _baseData.rh2, _baseData.gs, _baseData.gs2, _baseData.bv, _baseData.bv2);
-      return 4;
+      a = 4;
+      break;
     case 16:
       circularPalette = 0;
       colorScroll = warmDesertSunset;
-      return 8;
+      a = 8;
+      break;
     case 17:
       circularPalette = 0;
       colorScroll = coolDesertSunset;
-      return 2;
+      a = 2;
+      break;
     case 18:
       circularPalette = 0;
       colorScroll = purpleRedPinkMulti;
-      return 8;
+      a = 8;
+      break;
     case 19:
       circularPalette = 0;
       colorScroll = fullFive;
-      return 4;
+      a = 4;
+      break;
     case 20: {
         //saturationStepdown
         //leaves approximation for any color
@@ -501,7 +525,8 @@ uint8_t paletteSelect(uint8_t n) {
           index -= 200/8;
         }
         circularPalette = 0;
-        return 8;
+        a = 8;
+        break;
       }
     case 21:
       circularPalette = 1;
@@ -509,9 +534,11 @@ uint8_t paletteSelect(uint8_t n) {
       for(int i = 0; i < 256; i++) {
         colorScroll[i] = CHSV(i, 255,255);
       }
-      return 8;
+      a = 8;
+      break;
   }
-  return 3;
+  activeColor = ColorFromPalette(colorScroll, random8(), 255, LINEARBLEND);
+  return a;
 }
 boolean verifyAddress() {
   if((addr == _baseDataTemp.zone || UNIV_NUMBER == _baseDataTemp.zone) && _baseDataTemp.rev <= SOFTWARE_REVISION 
@@ -626,6 +653,24 @@ void initUltra() {
 
 }
 
+int rockerState = 0;
+int prevRockerState = 0;
+CRGB oboard[1];
+void initRocker() {
+  pinMode(ROCK_UP, INPUT_PULLUP);
+  pinMode(ROCK_DN, INPUT_PULLUP);
+
+}
+void pollRocker() {
+  if(!digitalRead(ROCK_UP)) {
+    rockerState = -1;
+  } else if(!digitalRead(ROCK_DN)) {
+    rockerState = 1;
+  } else {
+    rockerState = 0;
+  }
+}
+
 void fadeUpBasic() {
   _baseData.qcomm = 10;
   _baseData.speed = 0;
@@ -651,11 +696,13 @@ void setup() {
   FastLED.addLeds<WS2811, 11, GRB>(ledsMatrix[11], NUM_LEDS);
   FastLED.addLeds<WS2811, 12, GRB>(ledsMatrix[12], NUM_LEDS);
   FastLED.addLeds<WS2811, 13, GRB>(ledsMatrix[13], NUM_LEDS);
+  FastLED.addLeds<WS2811, 38, GRB>(oboard, 1);
   delay(100);
 
   initRadio();
   initRotary();
   //initUltra();
+  initRocker();
 
   fullFive = leaves;
   if(BOOT_PATTERN == 1) {  //0 for chasing green, 1 for slow pulse
@@ -756,6 +803,75 @@ void tradeModes() {
   FastLED.setBrightness(BRIGHTNESS);
   FastLED.show();
 }
+void tradeModes(int i) {
+
+}
+int rangeNumber(int num, int lower, int upper) { //range a number between lower (inclusive) and upper (exclusive)
+  if(num < lower) {
+    return lower;
+  } else if(num >= upper) {
+    return upper - 1;
+  } else {
+    return num;
+  }
+  
+}
+int rangeNumberCircular(int num, int lower, int upper) { //circulate a number between lower (inclusive) and upper (exclusive)
+  if(num < lower) {
+    return upper - 1;
+  } else if(num >= upper) {
+    return lower;
+  } else {
+    return num;
+  }
+  
+}
+
+#define CHILL_LIMIT 18
+#define NORMAL_LIMIT 23
+
+void iterateColorTheme(int x) {
+  if(rockerState == -1) { //solid colors, static patterns only
+    x = rangeNumberCircular(x, 0, CHILL_LIMIT);
+  } else { //normal range
+    x = rangeNumberCircular(x, 0, NORMAL_LIMIT);
+  }
+  if(x != rcount) {
+    rcount = x;
+  }
+  if(x < 16) {
+    activeColor = CHSV(x * 16 , 255, 255);
+    _baseData.qcomm = 11;
+    _baseData.color = x * 16;
+  } else {
+    switch(x) {
+      case 16: //sunset static color stripes (orange at top, purple, then blue at floor)
+        activeColor = CHSV(195,255,255);
+        break;
+      case 17: //neon sunset static stripes (blue at ceiling, then magenta, then teal)
+        activeColor = CHSV(160,255,255);
+        break;
+      //end of CHILL patterns
+      case 18: //leaves twinkle
+        activeColor = CRGB(20, 150, 25);
+        _baseData.qcomm = 17;
+        break;
+      case 19: //multi stripe solid fade (qcomm == 41), sunsetFade palette
+        activeColor = CHSV(13,255,255);
+        break;
+      case 20: //multi stripe solid fade, blue and red dipole
+        activeColor = CRGB(255,0,0);
+        break;
+      case 21: //multi stripe solid fade, ocean palette
+        activeColor = CHSV(150, 255,255);
+        break;
+      case 22: //multi stripe solid fade, orange purple teal
+        activeColor = CHSV(160,255,255);
+        break;      
+    }
+  }
+  firstRun = 1; //flag to trigger light engine update
+}
 
 void loop() {
   // rcount += rotary();
@@ -773,21 +889,36 @@ void loop() {
   // }
   // delay(1000);
   // summonPeak(rcount);
-  rdelta = rotary();
-  if(engineActive == 0) {
-    rcount += rdelta;
+  pollRocker();
+  if(rockerState != prevRockerState) {
+    prevRockerState = rockerState;
+    if(rockerState == 0) { //Normal, Idle motion patterns, ultrasonic position following
+      oboard[0] = CRGB::Teal;
+    } else if(rockerState == -1) { //CHILL Disable motion pattern (disable light engine), solid color idle state, keep ultrasonic position following on - ultra chill mode
+      oboard[0] = CHSV(13,255,255);
+    } else if(rockerState == 1) { //Disable ultrasonic following, keep idle motion pattern - ideal for parties/ lots of people in hallway
+      oboard[0] = CRGB(180,0,255);
+    }
+    oboard[0] = CRGB((float) oboard[0].r * 0.1, (float) oboard[0].g * 0.1, (float) oboard[0].b * 0.1);
+    iterateColorTheme(rcount);
+    FastLED.show();
   }
+
+  rdelta = rotary();
   if(rdelta != 0) {
     lastKnAct = millis();
-    if(engineActive == 1) {
-      engineActive = 0;
-      tradeModes();
-    }
+    rcount += rdelta;
+    iterateColorTheme(rcount);
   }
-  if(millis() - lastKnAct > 3000 && engineActive == 0) {
-    engineActive = 1;
-    tradeModes();
-  }
+
+  // if(engineActive == 0) {
+  //   rcount += rdelta;
+  // }
+
+  // if(millis() - lastKnAct > 3000 && engineActive == 0) {
+  //   engineActive = 1;
+  //   tradeModes();
+  // }
   
 
   if(!engineActive) {
@@ -1164,6 +1295,7 @@ void loop() {
           protectedRedo = 1;
           //2700K 4000K 6000K 8500K
         }
+        activeColor = leds[0];
         ledsProject();
       }
     } else if(_baseData.qcomm == 11) { //SOLID COLOR, defined or random or variation around a defined color
@@ -1190,6 +1322,7 @@ void loop() {
         } else if(_baseData.extra == 8) { //vary around supplied blue
           fill_solid(leds, NUM_LEDS, CRGB(_baseData.rh, _baseData.gs, _baseData.bv + (random(0, _baseData.randfactor * 2) - _baseData.randfactor)));
         }
+        activeColor = leds[0];
         ledsProject();
         firstRun = 0;
       }
