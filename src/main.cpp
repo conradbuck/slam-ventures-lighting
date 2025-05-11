@@ -205,6 +205,7 @@ CRGB defaultColor = CRGB::SeaGreen;
 CRGB activeColor = CRGB::Purple;
 //change the indicies in this array to fill each LED strip with a different solid color, use ledsStripesProject(); to display it
 CRGB stripeColors[NUM_STRIPS];
+uint8_t stripeIndex[NUM_STRIPS];
 
 CRGB ledsMatrix[NUM_STRIPS][NUM_LEDS];
 
@@ -696,7 +697,7 @@ void setup() {
   }
   
   //ZONE NUMBER
-  addr = 0;
+  addr = 1;
 
   srand(seed);
   for(int i = 0; i < NUM_LEDS; i++) { //make it so that pallettes arent solid colored
@@ -1942,20 +1943,38 @@ void loop() {
       protectedRedo = 1;
     } else if(_baseData.qcomm == 41) { //BASIC PALETTE SCROLL PODWISE
       if(firstRun) {
-        paletteSelect(_baseData.extra);
+        int numberAnchorPoints = paletteSelect(_baseData.extra);
         if(_baseData.ext3 == 0) {
-        ghue = random8();
+          for(int i = 0; i < NUM_STRIPS; i++) {
+            stripeIndex[i] = random8();
+            stripeColors[i] =  ColorFromPalette(colorScroll, stripeIndex[i], 255, LINEARBLEND);
+          }
         } else {
-          ghue = _baseData.ext3;
+          uint8_t breakIdx = 0;
+          uint8_t fracMark = 0;
+          for(int i = 0; i < NUM_STRIPS; i++) {
+            stripeIndex[i] = _baseData.ext3 + breakIdx;
+            if(i > ((NUM_STRIPS - 1) / numberAnchorPoints) * fracMark) {
+              fracMark++;
+              breakIdx = queryNextBreak(breakIdx, numberAnchorPoints, 1);
+            }
+          }
+          for(int i = 0; i < NUM_STRIPS; i++) {
+            stripeColors[i] =  ColorFromPalette(colorScroll, stripeIndex[i], 255, LINEARBLEND);
+          }
         }
         firstRun = 0;
       }
-      fill_solid(leds, NUM_LEDS, ColorFromPalette(colorScroll, ghue, 255, LINEARBLEND));
-      ledsProject();
-      if(_baseData.ext2 == 0) {
-        ghue += _baseData.ext4;
-      } else {
-        ghue -= _baseData.ext4;
+      //fill_solid(leds, NUM_LEDS, ColorFromPalette(colorScroll, ghue, 255, LINEARBLEND));
+      //ledsProject();
+      ledsStripesProject();
+      for(int i = 0; i < NUM_STRIPS; i++) {
+        if(_baseData.ext2 == 0) {
+          stripeIndex[i] += _baseData.ext4;
+        } else {
+          stripeIndex[i] -= _baseData.ext4;
+        }
+        stripeColors[i] = ColorFromPalette(colorScroll, stripeIndex[i], 255, LINEARBLEND);
       }
       delayTime(_baseData.speed);
     } else if(_baseData.qcomm == 42) { //BASIC PALETTE SCROLL STRIPWISE
@@ -2002,5 +2021,5 @@ void loop() {
       currBrightness = bKey;
       powerStatus = 1;
     }
-}
+  }
 }
