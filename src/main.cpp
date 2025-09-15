@@ -2,7 +2,7 @@
 #include <FastLED.h>
 #include <NRFLite.h>
 #include <SPI.h>
-#include <Wire.h>
+#include <HardwareSerial.h>
 
 //leds
 #define NUM_LEDS 140
@@ -14,10 +14,10 @@
 //rocker
 #define ROCK_UP 41
 #define ROCK_DN 42
-//ultrasonic
-#define U_SCL 2
-#define U_SDA 1
-#define SRF02_ADDR 0x70
+//lidar
+//#define LIDAR_TX 2
+//#define LIDAR_RX 1
+
 //43 and 44 unused but are serial pins, maybe switch to them if UART necessary?
 //is 14 unused???
 
@@ -649,38 +649,61 @@ int rotary() {
    return(0);
 }
 
-void initUltra() {
-  Wire.begin(U_SDA, U_SCL);
-}
-
-bool noMovement = 0;
+//LIDAR
+HardwareSerial mySerial(2);
+int lidar[9];
+uint16_t livePeakPosition;
+uint16_t targetPeakPosition;
+uint16_t lastLidarDist;
+uint16_t maxLidarDistance = 695;
+unsigned long lastLidarPing = 0;
+uint16_t strength;
+uint16_t lidarTemp = 0;
 unsigned long noMovementSince = 0;
-unsigned long lastUltraPing = 0;
-int presentDist = 0; // 0 to 255
-int lastUltraDist = 0;
-#define MAX_DISTANCE 100
-int readSRF02DistanceCM() {
-  // Send command to initiate ranging in centimeters (0x51)
-  Wire.beginTransmission(SRF02_ADDR);
-  Wire.write(0x00);      // Command register
-  Wire.write(0x51);      // Range command in cm
-  Wire.endTransmission();
-
-  delay(70);  // Wait for measurement to complete (~65 ms for max range)
-
-  // Read 2 bytes from result register (0x02)
-  Wire.beginTransmission(SRF02_ADDR);
-  Wire.write(0x02);  // High byte of range result
-  Wire.endTransmission();
-
-  Wire.requestFrom(SRF02_ADDR, 2);
-  if (Wire.available() < 2) return -1; // Error
-
-  int highByte = Wire.read();
-  int lowByte = Wire.read();
-
-  return (highByte << 8) | lowByte;  // Combine bytes
+unsigned long lastPositionUpdate = 0;
+unsigned long followingShadowLedsUpdate = 0;
+unsigned long movementDetectionTimer = 0;
+bool noMovement = 0;
+void initLidar() {
+    mySerial.begin(115200, SERIAL_8N1, 2, 1);
 }
+void pollLidar() {
+  // Look for the 0x59 0x59 frame header
+  while (mySerial.available() >= 9) { // Peek ahead without removing bytes
+    if (mySerial.peek() == 0x59) {
+      mySerial.read();  // consume first 0x59
+      if (mySerial.peek() == 0x59) {
+        mySerial.read();  // consume second 0x59
+        // Store header
+        lidar[0] = 0x59;
+        lidar[1] = 0x59;
+
+        // Read the remaining 7 bytes
+        for (int i = 2; i < 9; i++) {
+          while (!mySerial.available()); // wait for byte
+          lidar[i] = mySerial.read();
+        }
+        return; // got a valid frame
+      }
+    } else {
+      // Drop misaligned byte and keep searching
+      mySerial.read();
+    }
+  }
+}
+uint16_t getLidarDistance() {
+    strength = (static_cast<uint16_t>(lidar[5]) << 8) | lidar[4];
+    lidarTemp = (static_cast<uint16_t>(lidar[7]) << 8) | lidar[6];
+    return (static_cast<uint16_t>(lidar[3]) << 8) | lidar[2]; //current distance measurement
+}
+void printLidarData() {
+    for(int i = 0; i < 9; i++) {
+        Serial.print(lidar[i]);
+        Serial.print(" ");
+    }
+    Serial.println();
+}
+//LIDAR
 
 int rockerState = 0;
 int prevRockerState = 0;
@@ -730,86 +753,15 @@ int rangeNumberCircular(int num, int lower, int upper) { //circulate a number be
   
 }
 
-void setup() {
-  //const int ledPins[14] = {4,5,6,7,15,16,17,18,8,9,10,11,12,13};
-  FastLED.addLeds<WS2811, 4, BRG>(ledsMatrix[0], NUM_LEDS);
-  FastLED.addLeds<WS2811, 5, BRG>(ledsMatrix[1], NUM_LEDS);
-  FastLED.addLeds<WS2811, 6, BRG>(ledsMatrix[2], NUM_LEDS);
-  FastLED.addLeds<WS2811, 7, BRG>(ledsMatrix[3], NUM_LEDS);
-  FastLED.addLeds<WS2811, 15, BRG>(ledsMatrix[4], NUM_LEDS);
-  FastLED.addLeds<WS2811, 16, BRG>(ledsMatrix[5], NUM_LEDS);
-  FastLED.addLeds<WS2811, 17, BRG>(ledsMatrix[6], NUM_LEDS);
-  FastLED.addLeds<WS2811, 18, BRG>(ledsMatrix[7], NUM_LEDS);
-  FastLED.addLeds<WS2811, 8, BRG>(ledsMatrix[8], NUM_LEDS);
-  FastLED.addLeds<WS2811, 9, BRG>(ledsMatrix[9], NUM_LEDS);
-  FastLED.addLeds<WS2811, 10, BRG>(ledsMatrix[10], NUM_LEDS);
-  FastLED.addLeds<WS2811, 11, BRG>(ledsMatrix[11], NUM_LEDS);
-  FastLED.addLeds<WS2811, 12, BRG>(ledsMatrix[12], NUM_LEDS);
-  FastLED.addLeds<WS2811, 13, BRG>(ledsMatrix[13], NUM_LEDS);
-  FastLED.addLeds<WS2811, 38, GRB>(oboard, 1);
-  delay(100);
-
-  initRadio();
-  initRotary();
-  initUltra();
-  initRocker();
-
-  fullFive = leaves;
-  if(BOOT_PATTERN == 1) {  //0 for chasing green, 1 for slow pulse
-    leds[0] = CHSV(88,188,255);
-    FastLED.setBrightness(0);
-    ledsProject();
-    for(int i = 0; i <= BRIGHTNESS; i++) {
-      FastLED.setBrightness(i);
-      ledsProject();
-      delay(2);
-    }
-    for(int i = BRIGHTNESS; i >= 0; i--) {
-      FastLED.setBrightness(i);
-      ledsProject();
-      delay(2);
-    }
-    //4000K
-    fill_solid(leds, NUM_LEDS, CRGB(255,106,44));
-    //
-    FastLED.setBrightness(0);
-    ledsProject();
-  } else if(BOOT_PATTERN == 0) { //chasing
-    for(int i = 0; i < NUM_LEDS; i++){
-      leds[i] = CHSV(88,188,255);
-      //leds[i] = CRGB::SeaGreen;
-      ledsProject();
-      fadeToBlackBy(leds, NUM_LEDS, 35);
-      delay(25);
-    }
-    //4000K
-    fill_solid(leds, NUM_LEDS, CRGB(255,106,44));
-    //
-    FastLED.setBrightness(0);
-    ledsProject();
-
-    fadeUpBasic();
-  } else if(BOOT_PATTERN == 2) { //init to default white
-    fadeUpBasic();
+//summons the shadow around a position in the LED strip
+void summonPeak(uint16_t ledIndex) { // 0 <= x < NUM_LEDS
+  int tailLength = 10;
+  if(ledIndex > NUM_LEDS) {
+    ledIndex = NUM_LEDS;
   }
-  
-  //ZONE NUMBER
-  addr = 1;
-
-  presentDist = (float) rangeNumber(readSRF02DistanceCM(), 0, (int) MAX_DISTANCE) / MAX_DISTANCE;
-
-  srand(seed);
-  for(int i = 0; i < NUM_LEDS; i++) { //make it so that pallettes arent solid colored
-    colorIndex[i] = random8();
-  }
-
-}
-
-void summonPeak(int x) { // 0 <= x < 255
-  int tailLength = 7;
   fill_solid(leds, NUM_LEDS, CRGB::Black);
-  int ledIndex = (int)(((float) x) / 255.0 * NUM_LEDS);
   leds[ledIndex] = activeColor;
+
   for(int i = ledIndex + 1; i < NUM_LEDS; i++) {
     if(abs(ledIndex - i) > tailLength) { break; }
     CRGB t = activeColor;
@@ -820,13 +772,13 @@ void summonPeak(int x) { // 0 <= x < 255
   }
   for(int i = ledIndex - 1; i > 0; i--) {
     if(abs(ledIndex - i) > tailLength) { break; }
-    // leds[i] = activeColor;
     CRGB t = activeColor;
     t.r = t.r * ((float) (tailLength - abs(ledIndex - i))) / tailLength;
     t.g = t.g * ((float) (tailLength - abs(ledIndex - i))) / tailLength;
     t.b = t.b * ((float) (tailLength - abs(ledIndex - i))) / tailLength;
     leds[i] = t;
   }
+
   ledsProject();
 }
 
@@ -835,43 +787,12 @@ unsigned long lastKnAct = 0;
 int rdelta = 0;
 CRGB offMode[NUM_LEDS];
 
-void tradeModes() {
-  for(int i = BRIGHTNESS; i >= 0; i-= 3) {
-    FastLED.setBrightness(i);
-    FastLED.show();
-  }
-  FastLED.setBrightness(0);
-  FastLED.show();
-  CRGB temp[NUM_LEDS];
-  for(int i = 0; i < NUM_LEDS; i++) {
-    temp[i] = leds[i];
-    leds[i] = offMode[i];
-    offMode[i] = temp[i];
-  }
-  ledsProject();
-  for(int i = 0; i <= BRIGHTNESS; i+= 3) {
-    FastLED.setBrightness(i);
-    FastLED.show();
-  }
-  FastLED.setBrightness(BRIGHTNESS);
-  FastLED.show();
-}
-// void tradeModes(int i) {
-
-// }
-
-#define CHILL_LIMIT 18
-#define NORMAL_LIMIT 21
-
 void iterateColorTheme(int x) {
-  if(rockerState == -1) { //solid colors, static patterns only
-    x = rangeNumberCircular(x, 0, CHILL_LIMIT);
-  } else { //normal range
-    x = rangeNumberCircular(x, 0, NORMAL_LIMIT);
-  }
-  if(x != rcount) {
+  x = rangeNumberCircular(x, 0, 20);
+  if(x != rcount) { //enforce ranging on rcount as well
     rcount = x;
   }
+  _baseData.brightKey = 255;
   if(x < 16) {
     activeColor = CHSV(x * 16 , 255, 255);
     _baseData.qcomm = 11;
@@ -930,63 +851,151 @@ void iterateColorTheme(int x) {
   firstRun = 1; //flag to trigger light engine update
 }
 
-void loop() {
-  pollRocker();
-  if(rockerState != prevRockerState) {
-    prevRockerState = rockerState;
-    if(rockerState == 0) { //Normal, Idle motion patterns, ultrasonic position following
-      oboard[0] = CRGB::Teal;
-    } else if(rockerState == -1) { //CHILL Disable motion pattern (disable light engine), solid color idle state, keep ultrasonic position following on - ultra chill mode
-      oboard[0] = CHSV(13,255,255); //orange
-    } else if(rockerState == 1) { //Disable ultrasonic following, keep idle motion pattern - ideal for parties/ lots of people in hallway
-      oboard[0] = CRGB(180,0,255); //purple
-    }
-    oboard[0] = CRGB((float) oboard[0].r * 0.1, (float) oboard[0].g * 0.1, (float) oboard[0].b * 0.1);
-    iterateColorTheme(rcount);
-    FastLED.show();
-  }
+void setup() {
+  //const int ledPins[14] = {4,5,6,7,15,16,17,18,8,9,10,11,12,13};
+  FastLED.addLeds<WS2811, 4, BRG>(ledsMatrix[0], NUM_LEDS);
+  FastLED.addLeds<WS2811, 5, BRG>(ledsMatrix[1], NUM_LEDS);
+  FastLED.addLeds<WS2811, 6, BRG>(ledsMatrix[2], NUM_LEDS);
+  FastLED.addLeds<WS2811, 7, BRG>(ledsMatrix[3], NUM_LEDS);
+  FastLED.addLeds<WS2811, 15, BRG>(ledsMatrix[4], NUM_LEDS);
+  FastLED.addLeds<WS2811, 16, BRG>(ledsMatrix[5], NUM_LEDS);
+  FastLED.addLeds<WS2811, 17, BRG>(ledsMatrix[6], NUM_LEDS);
+  FastLED.addLeds<WS2811, 18, BRG>(ledsMatrix[7], NUM_LEDS);
+  FastLED.addLeds<WS2811, 8, BRG>(ledsMatrix[8], NUM_LEDS);
+  FastLED.addLeds<WS2811, 9, BRG>(ledsMatrix[9], NUM_LEDS);
+  //these four strips below are unused, more strips can be connected to the esp with the unused ports on the esp
+  FastLED.addLeds<WS2811, 10, BRG>(ledsMatrix[10], NUM_LEDS);
+  FastLED.addLeds<WS2811, 11, BRG>(ledsMatrix[11], NUM_LEDS);
+  FastLED.addLeds<WS2811, 12, BRG>(ledsMatrix[12], NUM_LEDS);
+  FastLED.addLeds<WS2811, 13, BRG>(ledsMatrix[13], NUM_LEDS);
+  //onbard status LED
+  FastLED.addLeds<WS2811, 38, GRB>(oboard, 1);
+  delay(100);
 
+  Serial.begin(9600);
+
+  initRadio();
+  initRotary();
+  initLidar();
+  initRocker();
+
+  fullFive = leaves;
+  if(BOOT_PATTERN == 1) {  //0 for chasing green, 1 for slow pulse
+    leds[0] = CHSV(88,188,255);
+    FastLED.setBrightness(0);
+    ledsProject();
+    for(int i = 0; i <= BRIGHTNESS; i++) {
+      FastLED.setBrightness(i);
+      ledsProject();
+      delay(2);
+    }
+    for(int i = BRIGHTNESS; i >= 0; i--) {
+      FastLED.setBrightness(i);
+      ledsProject();
+      delay(2);
+    }
+    //4000K
+    fill_solid(leds, NUM_LEDS, CRGB(255,106,44));
+    //
+    FastLED.setBrightness(0);
+    ledsProject();
+  } else if(BOOT_PATTERN == 0) { //chasing
+    for(int i = 0; i < NUM_LEDS; i++){
+      leds[i] = CHSV(88,188,255);
+      ledsProject();
+      fadeToBlackBy(leds, NUM_LEDS, 35);
+      delay(25);
+    }
+    //4000K
+    fill_solid(leds, NUM_LEDS, CRGB(255,106,44));
+    //
+    FastLED.setBrightness(0);
+    ledsProject();
+
+    fadeUpBasic();
+  } else if(BOOT_PATTERN == 2) { //init to default white
+    fadeUpBasic();
+  }
+  
+  //ZONE NUMBER
+  addr = 1;
+  srand(seed);
+  for(int i = 0; i < NUM_LEDS; i++) { //make it so that pallettes arent solid colored
+    colorIndex[i] = random8();
+  }
+}
+
+void loop() {
+  
   rdelta = rotary();
   if(rdelta != 0) {
     lastKnAct = millis();
     rcount += rdelta;
-    iterateColorTheme(rcount);
-  }
-
-  // if(engineActive == 0) {
-  //   rcount += rdelta;
-  // }
-
-  // if(millis() - lastKnAct > 3000 && engineActive == 0) {
-  //   engineActive = 1;
-  //   tradeModes();
-  // }
-  
-  if(millis() - lastUltraPing > 100 && rockerState != 1) {
-    lastUltraDist = presentDist;
-    presentDist = (float) rangeNumber(readSRF02DistanceCM(), 0, (int) MAX_DISTANCE) / MAX_DISTANCE;
-    lastUltraPing = millis();
-    if(abs(lastUltraDist - presentDist) > 10) {
-      //movement detected
-      engineActive = 0;
-      tradeModes();
-    } else {
-      //no movement detected
-      noMovement = 1;
-      noMovementSince = millis();
+    if(rockerState == 1 || rockerState == 0) {
+      iterateColorTheme(rcount);
     }
+    Serial.println(rcount);
   }
 
-  if(!engineActive) {
-    summonPeak(presentDist);
-    // oboard[0] = CHSV(presentDist,255,255);
-    // FastLED.show();
-    if(noMovement == 1 && millis() - noMovementSince > 5000) { // if no movement for last 5 seconds, trade modes
+  pollRocker();
+  if(rockerState != prevRockerState) {
+    prevRockerState = rockerState;
+    if(rockerState == 1) {  //switch is up
+      //on, lidar following
       engineActive = 1;
-      noMovement = 0;
-      tradeModes();
+      oboard[0] = CHSV(13,255,255); //orange
+      iterateColorTheme(rcount);
+    } else if(rockerState == 0) { //switch is in middle
+      //on, no lidar following
+      oboard[0] = CRGB::Teal;
+      engineActive = 1;
+      iterateColorTheme(rcount);
+    } else if(rockerState == -1) {  //swith is down
+      //off
+      off(3);
+      engineActive = 0;
     }
-  } else {
+    oboard[0] = CRGB((float) oboard[0].r * 0.1, (float) oboard[0].g * 0.1, (float) oboard[0].b * 0.1);  //dimming it a little bit
+    FastLED.show();
+  }
+
+  if(rockerState == 1) {
+    if(millis() - lastLidarPing > 5) { //ping the lidar sensor every 5 ms
+      lastLidarPing = millis();
+      pollLidar();
+    }
+    if(millis() - lastPositionUpdate > 250) { //update the target position of the LEDs every 250ms
+      lastPositionUpdate = millis();
+      targetPeakPosition = (int)( ((float) getLidarDistance()) / ((float) maxLidarDistance) * NUM_LEDS);
+    }
+    if(millis() - followingShadowLedsUpdate > 1) { //have a function that converges the LED strip to the target position every 5ms
+      followingShadowLedsUpdate = millis();
+      if(engineActive == 0) {
+        if(livePeakPosition != targetPeakPosition) {
+          if(livePeakPosition < targetPeakPosition) {
+            livePeakPosition++;
+            summonPeak(livePeakPosition);
+          } else {
+            livePeakPosition--;
+            summonPeak(livePeakPosition);
+          }
+        }
+      } else {
+        if(abs(targetPeakPosition - NUM_LEDS) > 5) {
+          engineActive = 0;
+        }
+      }
+    }
+    if(millis() - movementDetectionTimer > 3000) {  //check if the livePeakPosition is sitting at the end of the hall every 3000ms
+      movementDetectionTimer = millis();
+      if(abs(livePeakPosition - NUM_LEDS) < 5) {
+        engineActive = 1;
+        iterateColorTheme(rcount);
+      }
+    }
+  }
+  
+  if(engineActive) {
     if(!protectedRedo) {
       checkNewData();
     }
