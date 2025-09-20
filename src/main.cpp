@@ -167,6 +167,11 @@ struct __attribute__((packed)) RadioPacket {
     uint8_t rev;
 };
 
+bool engineActive = 1;
+unsigned long lastKnAct = 0;
+int rdelta = 0;
+CRGB offMode[NUM_LEDS];
+
 //array that holds values 0-255 to represent places within a palette. randomized upon startup. see _.qcomm = 15
 uint8_t colorIndex[NUM_LEDS];
 //used in delayTime() to allow for constant checking of new data
@@ -396,6 +401,46 @@ void hueSatOnlyPaletteCircular(uint8_t a, uint8_t a2, uint8_t b, uint8_t b2, uin
   colorScroll = CHSVPalette16(CHSV(a,a2,255), CHSV(b,b2,255), CHSV(c,c2,255), CHSV(a,a2,255));
 }
 
+
+int rockerState = 0;
+int prevRockerState = 0;
+CRGB oboard[1];
+void initRocker() {
+  pinMode(ROCK_UP, INPUT_PULLUP);
+  pinMode(ROCK_DN, INPUT_PULLUP);
+
+}
+void pollRocker() {
+  if(!digitalRead(ROCK_UP)) {
+    rockerState = -1;
+  } else if(!digitalRead(ROCK_DN)) {
+    rockerState = 1;
+  } else {
+    rockerState = 0;
+  }
+}
+
+int rangeNumber(int num, int lower, int upper) { //range a number between lower (inclusive) and upper (exclusive)
+  if(num < lower) {
+    return lower;
+  } else if(num >= upper) {
+    return upper - 1;
+  } else {
+    return num;
+  }
+  
+}
+int rangeNumberCircular(int num, int lower, int upper) { //circulate a number between lower (inclusive) and upper (exclusive)
+  if(num < lower) {
+    return upper - 1;
+  } else if(num >= upper) {
+    return lower;
+  } else {
+    return num;
+  }
+  
+}
+
 void initRadio() {
   SPI.begin(48,47,21);  // SCK, MISO, MOSI
   if(!_satellite.init(RADIO_ID, PIN_RADIO_CE, PIN_RADIO_CSN, NRFLite::BITRATE2MBPS)) {
@@ -584,35 +629,89 @@ boolean checkNewData() {
   }
   return false;
 }
-boolean delayTime(uint16_t delayamnt) {
-  difference = millis();
-  while( millis() - difference < delayamnt) {
-    if(checkNewData() && verifyAddress()) {
-      return true;
-    }
-  }
-  return false;
-}
-void off(uint16_t dspeed) {
-  for(int i = 1; i <= currBrightness; i++) {
-    FastLED.setBrightness(currBrightness - i);
-    ledsProject();
-    delayTime(dspeed+1);
-  }
-  powerStatus = 0;
-  currBrightness = 0;
-}
-void on(uint8_t goal, uint16_t dspeed) {
-  for(int i = goal; i >= 0; i--) {
-    FastLED.setBrightness(goal - i);
-    ledsProject();
-    delayTime(dspeed+1);
-  }
-  powerStatus = 1;
-  currBrightness = BRIGHTNESS;
-}
 
 int rcount = 0;
+void iterateColorTheme(int x) {
+  x = rangeNumberCircular(x, 0, 24);
+  if(x != rcount) { //enforce ranging on rcount as well
+    rcount = x;
+  }
+  _baseData.brightKey = 255;
+  if(x < 16) {
+    activeColor = CHSV(x * 16 , 255, 255);
+    _baseData.qcomm = 11;
+    _baseData.color = x * 16;
+  } else {
+    switch(x) {
+      case 16: //sunset static color stripes (orange at top, purple, then blue at floor)
+        activeColor = CHSV(195,255,255);
+        _baseData.qcomm = 41;
+        _baseData.ext3 = 0;
+        _baseData.ext4 = 0;
+        _baseData.extra = 6;
+        _baseData.rh = 13;
+        _baseData.gs = 165;
+        _baseData.bv = 190;
+        break;
+      case 17: //neon sunset static stripes (blue at ceiling, then magenta, then teal)
+        activeColor = CHSV(160,255,255);
+        _baseData.qcomm = 41;
+        _baseData.ext3 = 0;
+        _baseData.ext4 = 0;
+        _baseData.extra = 6;
+        _baseData.rh = 160;
+        _baseData.gs = 220;
+        _baseData.bv = 120;
+        break;
+      case 18: //multi stripe solid fade (qcomm == 41), sunsetFade palette
+        activeColor = CHSV(13,255,255);
+        _baseData.qcomm = 41;
+        _baseData.ext3 = 0;
+        _baseData.ext4 = 1;
+        _baseData.extra = 6;
+        _baseData.rh = 13;
+        _baseData.gs = 165;
+        _baseData.bv = 190;
+        _baseData.speed = 20;
+        break;
+      case 19: //multi stripe solid fade, ocean (cbPal) palette
+        activeColor = CHSV(150, 255,255);
+        _baseData.qcomm = 41;
+        _baseData.ext3 = 0;
+        _baseData.ext4 = 1;
+        _baseData.extra = 12;
+        _baseData.speed = 20;
+        break;
+      case 20:  //2700K
+        activeColor = CRGB(255,78,8);
+        _baseData.qcomm = 10;
+        _baseData.extra = 0;
+        _baseData.color = 270;
+        break;
+      case 21:  //salmon
+        activeColor = CRGB(255,73,21);
+        _baseData.qcomm = 10;
+        _baseData.extra = 0;
+        _baseData.color = 5;
+        break;
+      case 22:  //4000K
+        activeColor = CRGB(255,106,44);
+        _baseData.qcomm = 10;
+        _baseData.extra = 0;
+        _baseData.color = 400;
+        break;
+      case 23:  //6500K
+        activeColor =  CRGB(239,164,173);
+        _baseData.qcomm = 10;
+        _baseData.extra = 0;
+        _baseData.color = 650;
+        break;
+      
+    }
+  }
+  firstRun = 1; //flag to trigger light engine update
+}
+
 void initRotary() {
   pinMode(CLK, INPUT_PULLUP);
   pinMode(DAT, INPUT_PULLUP);
@@ -647,6 +746,56 @@ int rotary() {
    /* lrsum > 0 if the impossible transition */
    lrsumR=0;
    return(0);
+}
+boolean checkRotary() {
+  rdelta = rotary();
+  if(rdelta != 0) {
+    lastKnAct = millis();
+    rcount += rdelta;
+    if(rockerState == 1 || rockerState == 0) {
+      iterateColorTheme(rcount);
+    }
+    Serial.println(rcount);
+    return true;
+  } else {
+    return false;
+  }
+}
+void fadeUpBasic() {
+  _baseData.qcomm = 10;
+  _baseData.speed = 0;
+  _baseData.extra = 5;
+  _baseData.brightKey = 255;
+  paletteIndex = 0;
+  firstRun = 1;
+}
+//summons the shadow around a position in the LED strip
+void summonPeak(uint16_t ledIndex) { // 0 <= x < NUM_LEDS
+  int tailLength = 10;
+  if(ledIndex > NUM_LEDS) {
+    ledIndex = NUM_LEDS;
+  }
+  fill_solid(leds, NUM_LEDS, CRGB::Black);
+  leds[ledIndex] = activeColor;
+
+  for(int i = ledIndex + 1; i < NUM_LEDS; i++) {
+    if(abs(ledIndex - i) > tailLength) { break; }
+    CRGB t = activeColor;
+    t.r = t.r * ((float) (tailLength - abs(ledIndex - i))) / tailLength;
+    t.g = t.g * ((float) (tailLength - abs(ledIndex - i))) / tailLength;
+    t.b = t.b * ((float) (tailLength - abs(ledIndex - i))) / tailLength;
+    leds[i] = t;
+  }
+  for(int i = ledIndex - 1; i > 0; i--) {
+    if(abs(ledIndex - i) > tailLength) { break; }
+    CRGB t = activeColor;
+    t.r = t.r * ((float) (tailLength - abs(ledIndex - i))) / tailLength;
+    t.g = t.g * ((float) (tailLength - abs(ledIndex - i))) / tailLength;
+    t.b = t.b * ((float) (tailLength - abs(ledIndex - i))) / tailLength;
+    leds[i] = t;
+  }
+
+  ledsProject();
 }
 
 //LIDAR
@@ -703,152 +852,90 @@ void printLidarData() {
     }
     Serial.println();
 }
-//LIDAR
-
-int rockerState = 0;
-int prevRockerState = 0;
-CRGB oboard[1];
-void initRocker() {
-  pinMode(ROCK_UP, INPUT_PULLUP);
-  pinMode(ROCK_DN, INPUT_PULLUP);
-
-}
-void pollRocker() {
-  if(!digitalRead(ROCK_UP)) {
-    rockerState = -1;
-  } else if(!digitalRead(ROCK_DN)) {
-    rockerState = 1;
-  } else {
-    rockerState = 0;
+int liveBrightness = 0;
+boolean updateLidar() {
+  boolean movementDetected = false;
+  if(millis() - lastLidarPing > 5) { //ping the lidar sensor every 5 ms
+    lastLidarPing = millis();
+    pollLidar();
   }
-}
-
-void fadeUpBasic() {
-  _baseData.qcomm = 10;
-  _baseData.speed = 0;
-  _baseData.extra = 5;
-  _baseData.brightKey = 255;
-  paletteIndex = 0;
-  firstRun = 1;
-}
-
-int rangeNumber(int num, int lower, int upper) { //range a number between lower (inclusive) and upper (exclusive)
-  if(num < lower) {
-    return lower;
-  } else if(num >= upper) {
-    return upper - 1;
-  } else {
-    return num;
-  }
-  
-}
-int rangeNumberCircular(int num, int lower, int upper) { //circulate a number between lower (inclusive) and upper (exclusive)
-  if(num < lower) {
-    return upper - 1;
-  } else if(num >= upper) {
-    return lower;
-  } else {
-    return num;
-  }
-  
-}
-
-//summons the shadow around a position in the LED strip
-void summonPeak(uint16_t ledIndex) { // 0 <= x < NUM_LEDS
-  int tailLength = 10;
-  if(ledIndex > NUM_LEDS) {
-    ledIndex = NUM_LEDS;
-  }
-  fill_solid(leds, NUM_LEDS, CRGB::Black);
-  leds[ledIndex] = activeColor;
-
-  for(int i = ledIndex + 1; i < NUM_LEDS; i++) {
-    if(abs(ledIndex - i) > tailLength) { break; }
-    CRGB t = activeColor;
-    t.r = t.r * ((float) (tailLength - abs(ledIndex - i))) / tailLength;
-    t.g = t.g * ((float) (tailLength - abs(ledIndex - i))) / tailLength;
-    t.b = t.b * ((float) (tailLength - abs(ledIndex - i))) / tailLength;
-    leds[i] = t;
-  }
-  for(int i = ledIndex - 1; i > 0; i--) {
-    if(abs(ledIndex - i) > tailLength) { break; }
-    CRGB t = activeColor;
-    t.r = t.r * ((float) (tailLength - abs(ledIndex - i))) / tailLength;
-    t.g = t.g * ((float) (tailLength - abs(ledIndex - i))) / tailLength;
-    t.b = t.b * ((float) (tailLength - abs(ledIndex - i))) / tailLength;
-    leds[i] = t;
-  }
-
-  ledsProject();
-}
-
-bool engineActive = 1;
-unsigned long lastKnAct = 0;
-int rdelta = 0;
-CRGB offMode[NUM_LEDS];
-
-void iterateColorTheme(int x) {
-  x = rangeNumberCircular(x, 0, 20);
-  if(x != rcount) { //enforce ranging on rcount as well
-    rcount = x;
-  }
-  _baseData.brightKey = 255;
-  if(x < 16) {
-    activeColor = CHSV(x * 16 , 255, 255);
-    _baseData.qcomm = 11;
-    _baseData.color = x * 16;
-  } else {
-    switch(x) {
-      case 16: //sunset static color stripes (orange at top, purple, then blue at floor)
-        activeColor = CHSV(195,255,255);
-        _baseData.qcomm = 41;
-        _baseData.ext3 = 0;
-        _baseData.ext4 = 0;
-        _baseData.extra = 6;
-        _baseData.rh = 13;
-        _baseData.gs = 165;
-        _baseData.bv = 190;
-        break;
-      case 17: //neon sunset static stripes (blue at ceiling, then magenta, then teal)
-        activeColor = CHSV(160,255,255);
-        _baseData.qcomm = 41;
-        _baseData.ext3 = 0;
-        _baseData.ext4 = 0;
-        _baseData.extra = 6;
-        _baseData.rh = 160;
-        _baseData.gs = 220;
-        _baseData.bv = 120;
-        break;
-      //end of CHILL patterns
-      case 18: //leaves twinkle
-        activeColor = CRGB(20, 150, 25);
-        _baseData.qcomm = 17;
-        _baseData.extra = 13;
-        _baseData.speed = 30;
-        _baseData.randfactor = 0;
-        break;
-      case 19: //multi stripe solid fade (qcomm == 41), sunsetFade palette
-        activeColor = CHSV(13,255,255);
-        _baseData.qcomm = 41;
-        _baseData.ext3 = 0;
-        _baseData.ext4 = 1;
-        _baseData.extra = 6;
-        _baseData.rh = 13;
-        _baseData.gs = 165;
-        _baseData.bv = 190;
-        _baseData.speed = 20;
-        break;
-      case 20: //multi stripe solid fade, ocean (cbPal) palette
-        activeColor = CHSV(150, 255,255);
-        _baseData.qcomm = 41;
-        _baseData.ext3 = 0;
-        _baseData.ext4 = 1;
-        _baseData.extra = 12;
-        _baseData.speed = 20;
-        break;  
+  if(millis() - lastPositionUpdate > 300) { //update the target position of the LEDs every 250ms
+    lastPositionUpdate = millis();
+    targetPeakPosition = (int)( ((float) getLidarDistance()) / ((float) maxLidarDistance) * NUM_LEDS);
+    if(livePeakPosition != targetPeakPosition) {
+      movementDetected = true;
     }
   }
-  firstRun = 1; //flag to trigger light engine update
+  if(millis() - followingShadowLedsUpdate > 1) { //have a function that converges the LED strip to the target position every 5ms
+    followingShadowLedsUpdate = millis();
+    if(engineActive == 0) {
+      if(livePeakPosition != targetPeakPosition) {
+        if(liveBrightness < 255) { //bring up brightness when transitioning into peak mode
+          liveBrightness += 1;
+          FastLED.setBrightness(liveBrightness);
+        }
+        if(livePeakPosition < targetPeakPosition) {
+          livePeakPosition++;
+          summonPeak(livePeakPosition);
+        } else {
+          livePeakPosition--;
+          summonPeak(livePeakPosition);
+        }
+      }
+    } else {
+      if(abs(targetPeakPosition - NUM_LEDS) > 5) {
+        livePeakPosition = 0; //reset to zero so peak starts at box and comes to meet you
+        liveBrightness = 0;
+        engineActive = 0; //SWAP POINT, going to peak mode
+      }
+    }
+  }
+  if(millis() - movementDetectionTimer > 1000 && engineActive == 0) {  //check if the livePeakPosition is sitting at the end of the hall every 3000ms
+    movementDetectionTimer = millis();
+    if(abs(livePeakPosition - NUM_LEDS) < 5) {
+      engineActive = 1;   //SWAP POINT, going back to idle mode
+      for(int i = currBrightness; i >= 0; i -= 5) {
+        FastLED.setBrightness(i);
+        ledsProject();
+        delay(1);
+      }
+      FastLED.setBrightness(0);
+      powerStatus = 0;
+      currBrightness = 0;
+      
+      iterateColorTheme(rcount);
+    }
+  }
+  return movementDetected;
+}
+//LIDAR
+
+boolean delayTime(uint16_t delayamnt) {
+  difference = millis();
+  while( millis() - difference < delayamnt) {
+    if((checkNewData() && verifyAddress()) || checkRotary() || updateLidar()) {
+      return true;  //exit the delay early
+    }
+  }
+  return false; //the delay finished completely
+}
+void off(uint16_t dspeed) {
+  for(int i = 1; i <= currBrightness; i++) {
+    FastLED.setBrightness(currBrightness - i);
+    ledsProject();
+    delayTime(dspeed+1);
+  }
+  powerStatus = 0;
+  currBrightness = 0;
+}
+void on(uint8_t goal, uint16_t dspeed) {
+  for(int i = goal; i >= 0; i--) {
+    FastLED.setBrightness(goal - i);
+    ledsProject();
+    delayTime(dspeed+1);
+  }
+  powerStatus = 1;
+  currBrightness = BRIGHTNESS;
 }
 
 void setup() {
@@ -926,17 +1013,7 @@ void setup() {
 }
 
 void loop() {
-  
-  rdelta = rotary();
-  if(rdelta != 0) {
-    lastKnAct = millis();
-    rcount += rdelta;
-    if(rockerState == 1 || rockerState == 0) {
-      iterateColorTheme(rcount);
-    }
-    Serial.println(rcount);
-  }
-
+  checkRotary();
   pollRocker();
   if(rockerState != prevRockerState) {
     prevRockerState = rockerState;
@@ -955,44 +1032,12 @@ void loop() {
       off(3);
       engineActive = 0;
     }
-    oboard[0] = CRGB((float) oboard[0].r * 0.1, (float) oboard[0].g * 0.1, (float) oboard[0].b * 0.1);  //dimming it a little bit
+    oboard[0] = CRGB((float) oboard[0].r * 0.1, (float) oboard[0].g * 0.1, (float) oboard[0].b * 0.1);  //dimming it a lot bit
     FastLED.show();
   }
 
   if(rockerState == 1) {
-    if(millis() - lastLidarPing > 5) { //ping the lidar sensor every 5 ms
-      lastLidarPing = millis();
-      pollLidar();
-    }
-    if(millis() - lastPositionUpdate > 250) { //update the target position of the LEDs every 250ms
-      lastPositionUpdate = millis();
-      targetPeakPosition = (int)( ((float) getLidarDistance()) / ((float) maxLidarDistance) * NUM_LEDS);
-    }
-    if(millis() - followingShadowLedsUpdate > 1) { //have a function that converges the LED strip to the target position every 5ms
-      followingShadowLedsUpdate = millis();
-      if(engineActive == 0) {
-        if(livePeakPosition != targetPeakPosition) {
-          if(livePeakPosition < targetPeakPosition) {
-            livePeakPosition++;
-            summonPeak(livePeakPosition);
-          } else {
-            livePeakPosition--;
-            summonPeak(livePeakPosition);
-          }
-        }
-      } else {
-        if(abs(targetPeakPosition - NUM_LEDS) > 5) {
-          engineActive = 0;
-        }
-      }
-    }
-    if(millis() - movementDetectionTimer > 3000) {  //check if the livePeakPosition is sitting at the end of the hall every 3000ms
-      movementDetectionTimer = millis();
-      if(abs(livePeakPosition - NUM_LEDS) < 5) {
-        engineActive = 1;
-        iterateColorTheme(rcount);
-      }
-    }
+    updateLidar();
   }
   
   if(engineActive) {
@@ -2212,10 +2257,10 @@ void loop() {
     
     if(_baseData.qcomm >= 6 && powerStatus == 0 && !protectedRedo) { //THE AUTO RAMP UP
       int bKey = (int) ((BRIGHTNESS / (float) 255) * _baseData.brightKey); //256% scale
-      for(int i = bKey; i >= 0; i--) {
+      for(int i = bKey; i >= 0; i-=2) {
           FastLED.setBrightness(bKey - i);
           ledsProject();
-          delay(2);
+          delay(1);
       }
       currBrightness = bKey;
       powerStatus = 1;
