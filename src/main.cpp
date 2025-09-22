@@ -890,7 +890,7 @@ boolean updateLidar() {
       }
     }
   }
-  if(millis() - movementDetectionTimer > 1000 && engineActive == 0) {  //check if the livePeakPosition is sitting at the end of the hall every 3000ms
+  if(millis() - movementDetectionTimer > 2700 && engineActive == 0) {  //check if the livePeakPosition is sitting at the end of the hall every 3000ms
     movementDetectionTimer = millis();
     if(abs(livePeakPosition - NUM_LEDS) < 5) {
       engineActive = 1;   //SWAP POINT, going back to idle mode
