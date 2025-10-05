@@ -418,6 +418,8 @@ void pollRocker() {
   } else {
     rockerState = 0;
   }
+  Serial.println(rockerState);
+  delay(20);
 }
 
 int rangeNumber(int num, int lower, int upper) { //range a number between lower (inclusive) and upper (exclusive)
@@ -913,7 +915,7 @@ boolean updateLidar() {
 boolean delayTime(uint16_t delayamnt) {
   difference = millis();
   while( millis() - difference < delayamnt) {
-    if((checkNewData() && verifyAddress()) || checkRotary() || updateLidar()) {
+    if((checkNewData() && verifyAddress()) || checkRotary()) { // || updateLidar()) {
       return true;  //exit the delay early
     }
   }
