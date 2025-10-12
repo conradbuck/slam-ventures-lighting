@@ -167,7 +167,7 @@ struct __attribute__((packed)) RadioPacket {
     uint8_t rev;
 };
 
-bool engineActive = 1;
+bool engineActive = 0;
 unsigned long lastKnAct = 0;
 int rdelta = 0;
 CRGB offMode[NUM_LEDS];
@@ -861,7 +861,7 @@ boolean updateLidar() {
     lastLidarPing = millis();
     pollLidar();
   }
-  if(millis() - lastPositionUpdate > 300) { //update the target position of the LEDs every 250ms
+  if(millis() - lastPositionUpdate > 250) { //update the target position of the LEDs every 250ms
     lastPositionUpdate = millis();
     targetPeakPosition = (int)( ((float) getLidarDistance()) / ((float) maxLidarDistance) * NUM_LEDS);
     if(livePeakPosition != targetPeakPosition) {
@@ -872,7 +872,7 @@ boolean updateLidar() {
     followingShadowLedsUpdate = millis();
     if(engineActive == 0) {
       if(livePeakPosition != targetPeakPosition) {
-        if(liveBrightness < 255) { //bring up brightness when transitioning into peak mode
+        if(liveBrightness < BRIGHTNESS) { //bring up brightness when transitioning into peak mode
           liveBrightness += 1;
           FastLED.setBrightness(liveBrightness);
         }
@@ -989,6 +989,7 @@ void setup() {
     FastLED.setBrightness(0);
     ledsProject();
   } else if(BOOT_PATTERN == 0) { //chasing
+    FastLED.setBrightness(BRIGHTNESS);
     for(int i = 0; i < NUM_LEDS; i++){
       leds[i] = CHSV(88,188,255);
       ledsProject();
@@ -1012,6 +1013,8 @@ void setup() {
   for(int i = 0; i < NUM_LEDS; i++) { //make it so that pallettes arent solid colored
     colorIndex[i] = random8();
   }
+  rockerState = -1;
+  prevRockerState = -1;
 }
 
 void loop() {
