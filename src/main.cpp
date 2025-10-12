@@ -1021,6 +1021,9 @@ void loop() {
   checkRotary();
   pollRocker();
   if(rockerState != prevRockerState) {
+    if(prevRockerState == 1 && rockerState == 0) {
+      FastLED.setBrightness(BRIGHTNESS); //once following is exited, set brightness to max
+    }
     prevRockerState = rockerState;
     if(rockerState == 1) {  //switch is up
       //on, lidar following
